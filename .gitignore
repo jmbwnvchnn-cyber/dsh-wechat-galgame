@@ -1,0 +1,45 @@
+# Local configuration and secrets
+config.json
+*.local.json
+.env
+.env.*
+
+# WeChat configuration, exports and user/chat data
+wechat/
+wechat-config.json
+chat-history/
+data/
+local-data/
+*.db
+*.sqlite
+*.sqlite3
+
+# Logs and generated runtime files
+*.log
+logs/
+runtime/
+release/
+node_modules/
+
+.venv/
+__pycache__/
+*.pyc
+.task*-smoke*/
+.superpowers/
+
+# Local development and verification leftovers
+.setup-test-*/
+.experience-*/
+.event-*/
+.random-*/
+*.db-*
+*.sqlite-*
+*.sqlite3-*
+*.bak
+*.tmp
+*.pid
+*.zip
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
