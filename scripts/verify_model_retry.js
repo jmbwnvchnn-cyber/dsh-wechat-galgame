@@ -1,0 +1,21 @@
+'use strict';
+const assert=require('node:assert/strict'),fs=require('node:fs'),path=require('node:path');
+const {generateTurn}=require('../src/llm'),{createHandler}=require('../src/handler');
+const root=fs.mkdtempSync(path.join(__dirname,'..','.model-retry-'));
+const original=global.fetch;let statuses=[],calls=0,cancels=0;
+global.fetch=async()=>{calls++;const status=statuses.shift()||200;return {ok:status===200,status,body:{cancel:async()=>{cancels++;}},json:async()=>({choices:[{message:{content:JSON.stringify({reply:'收到',delta:2,reason:'友善'})}}]})};};
+const config={root,groupAllowlist:['g'],respondOnlyWhenMentioned:true,randomEventsEnabled:false,modelEndpoint:'https://example.invalid'};
+const request={config,persona:{name:'角色'},route:{score:0},message:'你好'};
+const event=id=>({chat_type:'group',chat_id:'g',user_id:'u',nickname:'甲',msg_id:id,text:'真实互动',at_me:true,is_self:false});
+(async()=>{
+ statuses=[503,200];const turn=await generateTurn(request);assert.equal(turn.reply,'收到');assert.equal(calls,2);assert.equal(cancels,1);
+ const handler=createHandler(config);
+ calls=0;statuses=[503,503];const failed=await handler(event('failed'));
+ assert.equal(calls,2);assert.match(failed.reply,/服务|繁忙/);assert.ok(!failed.reply.includes('走神'));
+ let status=await handler.status();assert.equal(status.routes[0].score,0);assert.equal(status.modelFailure.code,'http_503');
+ assert.equal((await handler(event('failed'))).action,'ignored');assert.equal(calls,2);
+ calls=0;statuses=[401];await assert.rejects(generateTurn(request),e=>e.status===401);assert.equal(calls,1,'authentication failures must not retry');
+ calls=0;statuses=[503,200];const passed=await handler(event('recovered'));
+ assert.equal(passed.score,2);assert.equal(calls,2);assert.equal((await handler.status()).modelFailure,null);
+ console.log('模型重试验证通过：503后恢复、持续失败有界、401不重试、失败不计分、去重和恢复清除状态。');
+})().catch(e=>{console.error(e);process.exitCode=1;}).finally(()=>{global.fetch=original;fs.rmSync(root,{recursive:true,force:true});});

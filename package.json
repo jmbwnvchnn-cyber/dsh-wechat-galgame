@@ -1,0 +1,14 @@
+{
+  "name": "wechat-galgame",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Local WeChat galgame bridge service",
+  "type": "commonjs",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "start": "node server.js"
+  },
+  "license": "MIT"
+}

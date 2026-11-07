@@ -1,0 +1,21 @@
+'use strict';
+const assert=require('node:assert/strict');
+const {generateTurn,generateEventChoices}=require('../src/llm');
+const original=global.fetch;let body,requests=0,result;
+global.fetch=async(url,options)=>{requests++;body=JSON.parse(options.body);return{ok:true,json:async()=>({choices:[{message:{content:JSON.stringify(result)}}]})};};
+const options=[{text:'一起研究电影安排',reply:'她愿意继续讨论',delta:2},{text:'先了解彼此喜欢的类型',reply:'她说了自己的偏好',delta:1},{text:'晚一点再决定',reply:'她有些失落',delta:-1}];
+const config={modelEndpoint:'https://example.invalid',modelName:'test'},persona={name:'角色',prompt:'谨慎的电影爱好者'};
+const route={score:-30,eventRequest:true,profile:{nickname:'甲',facts:[{text:'我喜欢悬疑片'}]},groupConversation:[{nickname:'乙',text:'周末一起看电影'}]};
+(async()=>{
+ result={reply:'你想看什么电影？',delta:0,reason:'讨论',event:{title:'周末电影',text:'大家正在决定一起看哪部电影',options}};
+ const turn=await generateTurn({config,persona,route,message:'周末见'});
+ assert.equal(requests,1);assert.equal(turn.event.options.length,3);assert.match(body.messages[0].content,/戒备/);assert.match(body.messages[0].content,/取舍/);
+ assert.match(body.messages[1].content,/周末一起看电影/);
+ result={options};const chosen=await generateEventChoices({config,persona,route,scene:{title:'周末电影',text:'决定电影',context:route.groupConversation}});
+ assert.equal(chosen.length,3);assert.match(body.messages[1].content,/喜欢悬疑片/);
+  assert.match(body.messages[0].content,/json/i,'JSON mode requires an explicit JSON instruction on the personal-choice request too');
+ result={options:options.map(o=>({...o,delta:999}))};await assert.rejects(generateEventChoices({config,persona,route,scene:{title:'电影',text:'电影'}}));
+ result={reply:'正常回复',delta:0,reason:'讨论',event:{title:'电影',text:'电影',options:result.options}};
+ assert.equal((await generateTurn({config,persona,route,message:'周末见'})).event,null,'bad event cannot discard an otherwise valid reply');
+ console.log('事件模型契约通过：单次回复附带事件、话题与个人记忆、态度提示、越界拒绝和事件降级。');
+})().catch(e=>{console.error(e);process.exitCode=1;}).finally(()=>{global.fetch=original;});

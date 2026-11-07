@@ -1,0 +1,58 @@
+'use strict';
+const fs = require('node:fs');
+const path = require('node:path');
+const assert = require('node:assert/strict');
+const { createHandler } = require('../src/handler');
+const root = fs.mkdtempSync(path.join(__dirname, '..', '.task6-smoke-'));
+const config = { root, groupAllowlist: ['123@chatroom'], botUserId: 'bot', respondOnlyWhenMentioned: true };
+let now = Date.UTC(2026, 0, 1);
+const clock = () => now;
+const generateTurn = async () => ({ reply: '你好', delta: 5, reason: '测试' });
+const event = (user, id, overrides = {}) => ({ chat_id: '123@chatroom', chat_type: 'group', user_id: user, nickname: user, text: '你好', msg_id: id, at_me: true, is_self: false, ...overrides });
+(async () => {
+  let handle = createHandler(config, { generateTurn, now: clock });
+  await handle.savePersona({ name: '测试角色', aliases: ['测试'], prompt: '测试人设' });
+  for (const override of [{ chat_id: 'other@chatroom' }, { at_me: false }, { is_self: true }, { is_self: undefined }, { user_id: 'bot' }]) {
+    assert.equal((await handle(event('a', 'filtered', override))).action, 'ignored');
+  }
+  assert.equal((await handle(event('alias', 'alias-id', { groupId: 'outside@chatroom', senderId: 'bot', messageId: 'other-id', content: 'wrong' }))).score, 5);
+  let aliasStatus = await handle.status();
+  assert.equal(aliasStatus.routes.find(r => r.senderId === 'alias').groupId, '123@chatroom');
+  assert.equal((await handle(event('alias', 'alias-id', { groupId: 'elsewhere', senderId: 'different', messageId: 'different' }))).action, 'ignored');
+  handle = createHandler(config, { generateTurn, now: clock });
+  assert.equal((await handle(event('alias', 'alias-id', { messageId: 'after-reload' }))).action, 'ignored');
+  await handle.resetGame();
+  assert.equal((await handle(event('a', 'a0'))).score, 5);
+  assert.equal((await handle(event('a', 'a0'))).action, 'ignored');
+  assert.equal((await handle(event('b', 'b0'))).score, 5);
+  let status = await handle.status();
+  assert.equal(status.routes.length, 3);
+  assert.equal(status.routes.find(r => r.senderId === 'a').recentConversation.length, 1);
+  await handle.resetRoute('123@chatroom', 'b');
+  assert.equal((await handle.status()).routes.find(r => r.senderId === 'b').score, 0);
+  assert.equal((await handle(event('b', 'b0'))).action, 'ignored');
+  const messages = ['清晨阳光照亮窗台', '海边浪花轻拍沙滩', '森林小鸟唱起歌曲', '今晚星空格外璀璨', '厨房飘来烘焙香味', '雨后彩虹横跨天际', '山间溪流欢快奔跑', '图书馆藏着许多故事', '花园蝴蝶翩翩起舞', '冬日围炉分享趣事', '骑车穿过古老街巷', '湖畔柳树随风摇曳', '夏夜萤火点亮草丛', '旅途遇见温暖朋友', '画笔描绘美丽风景', '音乐陪伴悠闲午后', '猫咪蜷缩柔软沙发', '登高眺望远方云海', '秋叶铺满安静小径'];
+  for (let i = 1; i < 20; i++) { now += 86400000; await handle(event('a', `a${i}`, { text: messages[i - 1] })); }
+  status = await handle.status();
+  assert.equal(status.winner.senderId, 'a');
+  assert.equal((await handle(event('b', 'b1'))).score, 0);
+  assert.equal((await handle.status()).winner.senderId, 'a');
+  handle = createHandler(config, { generateTurn, now: clock });
+  status = await handle.status();
+  assert.equal(status.persona.name, '测试角色');
+  assert.equal(status.winner.senderId, 'a');
+  assert.equal((await handle(event('a', 'a19'))).action, 'ignored');
+  await handle.resetGame();
+  status = await handle.status();
+  assert.equal(status.winner, null);
+  assert.ok(status.routes.every(r => r.score === 0));
+  const failed = createHandler(config, { generateTurn: async () => { throw new Error('synthetic'); } });
+  assert.equal((await failed(event('a', 'retry'))).action, 'reply');
+  assert.equal((await failed.status()).routes.find(r => r.senderId === 'a').score, 0);
+  assert.equal((await failed(event('a', 'retry'))).action, 'ignored');
+  const reloaded = createHandler(config, { generateTurn, now: clock });
+  assert.equal((await reloaded(event('a', 'retry'))).action, 'ignored');
+  assert.equal((await reloaded.status()).routes.find(r => r.senderId === 'a').score, 0);
+  assert.equal((await reloaded.status()).winner, null);
+  console.log('通过：过滤、路线隔离、去重、重置、唯一胜者与冻结、重载、人设和模型失败兜底。');
+})().catch(error => { console.error(error); process.exitCode = 1; }).finally(() => fs.rmSync(root, { recursive: true, force: true }));
